@@ -1,0 +1,45 @@
+{{- $full := include "agentic.fullname" . -}}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.keda $svc.keda.enabled }}
+{{- if $.Values.kafka.sasl.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ $full }}-{{ $name }}-kafka
+  labels: {{- include "agentic.labels" $ | nindent 4 }}
+spec:
+  secretTargetRef:
+    - { parameter: username, name: {{ $.Values.kafka.sasl.secretName }}, key: {{ $.Values.kafka.sasl.usernameKey }} }
+    - { parameter: password, name: {{ $.Values.kafka.sasl.secretName }}, key: {{ $.Values.kafka.sasl.passwordKey }} }
+{{- end }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $full }}-{{ $name }}
+  labels: {{- include "agentic.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ $full }}-{{ $name }}
+  minReplicaCount: {{ $svc.keda.min }}
+  maxReplicaCount: {{ $svc.keda.max }}
+  cooldownPeriod: {{ $svc.keda.cooldownSeconds }}
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: {{ $.Values.kafka.bootstrap | quote }}
+        consumerGroup: {{ $.Values.config.WORKER_GROUP | default "agentic-workers" | quote }}
+        topic: {{ $.Values.config.TOPIC_TASKS | default "agent.tasks" | quote }}
+        lagThreshold: {{ $svc.keda.lagThreshold | quote }}
+        activationLagThreshold: "1"
+        offsetResetPolicy: latest
+        {{- if $.Values.kafka.sasl.enabled }}
+        sasl: plaintext
+        tls: enable
+        {{- end }}
+      {{- if $.Values.kafka.sasl.enabled }}
+      authenticationRef: { name: {{ $full }}-{{ $name }}-kafka }
+      {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,52 @@
+# Azure DevOps mirror of .github/workflows (ci + cd to staging). Prod promotion = environment with approval check.
+trigger: { branches: { include: [main] } }
+pr: { branches: { include: ["*"] } }
+pool: { vmImage: ubuntu-latest }
+variables:
+  acrLogin: myregistry.azurecr.io
+  image: $(acrLogin)/agentic-platform
+
+stages:
+  - stage: CI
+    jobs:
+      - job: test
+        services:
+          postgres: pg
+          redis: redis
+        steps:
+          - task: UsePythonVersion@0
+            inputs: { versionSpec: "3.12" }
+          - script: pip install -e ".[dev]" && ruff check src tests && pytest -q && agentic-evals --target inproc
+            displayName: lint, tests, eval gate
+            env:
+              TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agentic
+              TEST_REDIS_URL: redis://localhost:6379/0
+      - job: helm
+        steps:
+          - script: |
+              helm lint deploy/helm/agentic-platform -f deploy/helm/agentic-platform/values-staging.yaml
+              helm template agentic deploy/helm/agentic-platform -f deploy/helm/agentic-platform/values-prod.yaml > /dev/null
+            displayName: helm lint and render
+  - stage: Build
+    dependsOn: CI
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: image
+        steps:
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: agentic-acr
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az acr build -r ${ACR_LOGIN%%.*} -t agentic-platform:$(Build.SourceVersion) -f deploy/docker/Dockerfile .
+            env: { ACR_LOGIN: $(acrLogin) }
+          - script: |
+              sed -i -E "s|^(\s*tag:).*|\1 \"$(Build.SourceVersion)\"|" deploy/helm/agentic-platform/values-staging.yaml
+              git config user.email ado@local; git config user.name ado
+              git commit -am "deploy(staging): $(Build.SourceVersion)" && git push origin HEAD:main
+            displayName: GitOps bump (staging)
+resources:
+  containers:
+    - { container: pg, image: "pgvector/pgvector:pg16", env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: agentic }, ports: ["5432:5432"] }
+    - { container: redis, image: "redis:7", ports: ["6379:6379"] }

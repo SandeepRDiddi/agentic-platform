@@ -1,0 +1,9 @@
+# Quality gates. CI uses these against the in-process stack; the canary Job uses them against live models.
+task_success_rate:      {min: 0.90}
+adversarial_block_rate: {min: 1.00}   # every injection attempt must be blocked
+citation_rate:          {min: 0.90}
+p95_latency_s:          {max: 30.0}
+avg_cost_usd:           {max: 0.05}
+# Enable when running with --ragas against a live judge model:
+ragas_faithfulness:       {min: 0.80}
+ragas_answer_relevancy:   {min: 0.75}

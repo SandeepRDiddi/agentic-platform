@@ -1,0 +1,42 @@
+{{- if .Values.migrate.enabled }}
+{{- $full := include "agentic.fullname" . -}}
+{{- range $job := list "migrate" "eval-seed" }}
+{{- if or (eq $job "migrate") $.Values.analysis.evalGate.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $full }}-{{ $job }}-{{ $.Values.image.tag | replace "." "-" | replace "+" "-" | trunc 20 | trimSuffix "-" }}
+  labels: {{- include "agentic.labels" $ | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "{{ ternary "0" "5" (eq $job "migrate") }}"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $full }}
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: {{ $job }}
+          image: {{ include "agentic.image" $ | quote }}
+          env:
+            - { name: SERVICE, value: {{ ternary "migrate" "ingest" (eq $job "migrate") }} }
+            {{- if eq $job "eval-seed" }}
+            - { name: INGEST_TENANT, value: {{ $.Values.analysis.evalGate.tenant | quote }} }
+            {{- end }}
+          envFrom:
+            - configMapRef: { name: {{ $full }}-config }
+            - secretRef: { name: {{ $.Values.secretName }} }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+{{- end }}
+{{- end }}
+{{- end }}

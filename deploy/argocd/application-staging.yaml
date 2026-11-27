@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agentic-staging
+  namespace: argocd
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: agentic
+  source:
+    repoURL: https://github.com/YOUR_ORG/agentic-platform.git
+    targetRevision: main
+    path: deploy/helm/agentic-platform
+    helm:
+      releaseName: agentic
+      valueFiles: [values.yaml, values-staging.yaml]
+  destination: { server: https://kubernetes.default.svc, namespace: agentic-staging }
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+    retry: { limit: 3, backoff: { duration: 15s, factor: 2, maxDuration: 3m } }
+  ignoreDifferences:
+    - { group: argoproj.io, kind: Rollout, jsonPointers: [/spec/replicas] }
+    - { group: apps, kind: Deployment, jsonPointers: [/spec/replicas] }

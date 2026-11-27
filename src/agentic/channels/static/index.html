@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Platform</title>
+<style>
+  :root { color-scheme: light dark; --bd:#8884; --acc:#2563eb; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; display: grid; grid-template-rows: auto 1fr auto; height: 100vh; max-width: 860px; margin-inline: auto; }
+  header { padding: 12px 16px; border-bottom: 1px solid var(--bd); display: flex; gap: 8px; align-items: center; }
+  header h1 { font-size: 16px; margin: 0; flex: 1; }
+  #log { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { padding: 10px 14px; border-radius: 12px; max-width: 85%; white-space: pre-wrap; border: 1px solid var(--bd); }
+  .user { align-self: flex-end; background: color-mix(in srgb, var(--acc) 14%, transparent); }
+  .agent { align-self: flex-start; }
+  .meta { font-size: 12px; opacity: .65; margin-top: 6px; }
+  .card { border: 1px solid var(--bd); border-radius: 10px; padding: 10px; margin-top: 8px; }
+  form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--bd); }
+  input[type=text] { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--bd); background: transparent; color: inherit; }
+  button { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--bd); background: var(--acc); color: #fff; cursor: pointer; }
+  button.secondary { background: transparent; color: inherit; }
+  button:disabled { opacity: .5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Agent Platform</h1>
+  <input id="user" type="text" placeholder="user" size="8" value="alice">
+  <button class="secondary" id="login">Sign in (dev)</button>
+</header>
+<div id="log" aria-live="polite"></div>
+<form id="f"><input id="q" type="text" placeholder="Ask something, or: create a ticket for the failing job…" autocomplete="off" required><button id="send">Send</button></form>
+<script>
+let token = sessionStorage.getItem("tok") || "", conv = crypto.randomUUID();
+const $ = s => document.querySelector(s), log = $("#log");
+const hdr = () => ({ "content-type": "application/json", authorization: "Bearer " + token });
+function add(cls, text) { const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = text; log.append(d); log.scrollTop = log.scrollHeight; return d; }
+
+$("#login").onclick = async () => {
+  const r = await fetch("/dev/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sub: $("#user").value }) });
+  if (!r.ok) return add("agent", "Dev login is disabled. Provide an OIDC token (see README).");
+  token = (await r.json()).access_token; sessionStorage.setItem("tok", token); add("agent", "Signed in as " + $("#user").value);
+};
+
+function approvalCards(el, approvals) {
+  for (const a of approvals.filter(x => x.status === "pending")) {
+    const c = document.createElement("div"); c.className = "card";
+    c.innerHTML = `<b>Approval needed:</b> <code></code><pre></pre>`;
+    c.querySelector("code").textContent = a.tool; c.querySelector("pre").textContent = JSON.stringify(a.args, null, 2);
+    for (const [label, approve] of [["Approve", true], ["Deny", false]]) {
+      const b = document.createElement("button"); b.textContent = label; if (!approve) b.className = "secondary";
+      b.onclick = async () => {
+        const r = await fetch("/api/approvals/" + a.id, { method: "POST", headers: hdr(), body: JSON.stringify({ approve }) });
+        const d = await r.json(); c.textContent = r.ok ? `${a.tool}: ${d.status}` : (d.error?.message || "failed");
+      };
+      c.append(b);
+    }
+    el.append(c);
+  }
+}
+
+$("#f").onsubmit = async e => {
+  e.preventDefault(); const q = $("#q").value.trim(); if (!q) return; $("#q").value = "";
+  add("user", q); const out = add("agent", "…");
+  const r = await fetch("/api/chat", { method: "POST", headers: hdr(), body: JSON.stringify({ query: q, conversation_id: conv }) });
+  const d = await r.json();
+  if (!r.ok) { out.textContent = d.error?.message || "Request failed (sign in first?)"; return; }
+  try {
+    const resp = await fetch(`/api/chat/${d.task_id}/events`, { headers: { authorization: "Bearer " + token } });
+    if (!resp.ok || !resp.body) { out.textContent = "Stream failed (" + resp.status + ")"; return; }
+    const reader = resp.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i; while ((i = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+        const type = (frame.match(/^event: (.*)$/m) || [])[1], data = (frame.match(/^data: (.*)$/m) || [])[1];
+        if (!type || !data) continue;
+        const payload = JSON.parse(data);
+        if (type === "progress") out.textContent = "… " + payload.type;
+        else if (type === "result") {
+          const res = payload.result || {};
+          out.textContent = res.answer || payload.status;
+          if (res.citations?.length) { const m = document.createElement("div"); m.className = "meta"; m.textContent = "Sources: " + res.citations.map(c => c.source).join(", "); out.append(m); }
+          approvalCards(out, res.pending_approvals || []);
+        } else if (type === "error") out.textContent = payload.error?.message || "Error";
+      }
+    }
+  } catch (err) { out.textContent = "Connection lost"; }
+};
+</script>
+</body>
+</html>

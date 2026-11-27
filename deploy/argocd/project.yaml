@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: agentic
+  namespace: argocd
+spec:
+  description: Agentic platform
+  sourceRepos: ["https://github.com/YOUR_ORG/agentic-platform.git"]
+  destinations:
+    - { namespace: agentic-staging, server: https://kubernetes.default.svc }
+    - { namespace: agentic-prod, server: https://kubernetes.default.svc }
+  clusterResourceWhitelist: []
+  namespaceResourceBlacklist:
+    - { group: "", kind: ResourceQuota }

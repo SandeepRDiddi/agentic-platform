@@ -1,0 +1,8 @@
+# CD workflow rewrites image.tag below on every merge to main.
+image:
+  tag: "1.0.0"
+ingress:
+  host: agents-staging.example.com
+config:
+  ENV: staging
+  TENANT_DAILY_BUDGET_USD: "20"

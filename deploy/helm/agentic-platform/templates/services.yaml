@@ -1,0 +1,38 @@
+{{- $full := include "agentic.fullname" . -}}
+{{- range $name, $svc := .Values.services }}
+{{- $ctx := dict "root" $ "name" $name }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-{{ $name }}
+  labels:
+    {{- include "agentic.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+    agentic.io/metrics: "true"
+spec:
+  selector:
+    {{- include "agentic.selector" $ctx | nindent 4 }}
+  ports:
+    - name: {{ $svc.portName | default "http" }}
+      port: {{ $svc.port | int }}
+      targetPort: {{ $svc.portName | default "http" }}
+{{- if eq $svc.kind "rollout" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-{{ $name }}-canary
+  labels:
+    {{- include "agentic.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+    agentic.io/metrics: "true"
+spec:
+  selector:
+    {{- include "agentic.selector" $ctx | nindent 4 }}
+  ports:
+    - name: {{ $svc.portName | default "http" }}
+      port: {{ $svc.port | int }}
+      targetPort: {{ $svc.portName | default "http" }}
+{{- end }}
+{{- end }}

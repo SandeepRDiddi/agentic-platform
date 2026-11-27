@@ -1,0 +1,21 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "agentic.fullname" . }}
+  labels: {{- include "agentic.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      agentic.io/metrics: "true"
+  # Copies rollouts-pod-template-hash onto series so the canary-gate can scope queries to the canary pods.
+  podTargetLabels: [app.kubernetes.io/component, rollouts-pod-template-hash]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

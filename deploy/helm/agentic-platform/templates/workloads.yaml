@@ -1,0 +1,55 @@
+{{- $full := include "agentic.fullname" . -}}
+{{- range $name, $svc := .Values.services }}
+{{- $ctx := dict "root" $ "name" $name "svc" $svc }}
+---
+{{- if eq $svc.kind "rollout" }}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+{{- else }}
+apiVersion: apps/v1
+kind: Deployment
+{{- end }}
+metadata:
+  name: {{ $full }}-{{ $name }}
+  labels:
+    {{- include "agentic.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  {{- if not (or $svc.autoscaling (and $svc.keda $svc.keda.enabled)) }}
+  replicas: {{ $svc.replicas | default 1 }}
+  {{- end }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "agentic.selector" $ctx | nindent 6 }}
+  template:
+    {{- include "agentic.pod" $ctx | nindent 4 }}
+  {{- if eq $svc.kind "rollout" }}
+  strategy:
+    canary:
+      canaryService: {{ $full }}-{{ $name }}-canary
+      stableService: {{ $full }}-{{ $name }}
+      maxSurge: 25%
+      maxUnavailable: 0
+      {{- if $svc.ingressPaths }}
+      trafficRouting:
+        nginx:
+          stableIngress: {{ $full }}-{{ $name }}
+      {{- end }}
+      {{- $base := ternary $.Values.rollout.edgeSteps $.Values.rollout.internalSteps (not (empty $svc.ingressPaths)) }}
+      {{- $steps := list }}
+      {{- range $s := $base }}
+      {{- if hasKey $s "analysis" }}
+      {{- $args := list (dict "name" "canary-hash" "valueFrom" (dict "podTemplateHashValue" "Latest")) (dict "name" "metric-service" "value" $name) (dict "name" "eval-url" "value" (printf "http://%s-%s-canary:%d" $full $name ($svc.port | int))) (dict "name" "eval-path" "value" ($svc.evalPath | default "/v1/agent/runs")) }}
+      {{- $steps = append $steps (dict "analysis" (dict "templates" (list (dict "templateName" (printf "%s-canary-gate" $full))) "args" $args)) }}
+      {{- else }}
+      {{- $steps = append $steps $s }}
+      {{- end }}
+      {{- end }}
+      steps: {{ toYaml $steps | nindent 8 }}
+  {{- else }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 25%, maxUnavailable: 0 }
+  {{- end }}
+{{- end }}

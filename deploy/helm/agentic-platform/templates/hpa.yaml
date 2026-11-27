@@ -1,0 +1,25 @@
+{{- $full := include "agentic.fullname" . -}}
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.autoscaling }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $full }}-{{ $name }}
+  labels: {{- include "agentic.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: {{ ternary "argoproj.io/v1alpha1" "apps/v1" (eq $svc.kind "rollout") }}
+    kind: {{ ternary "Rollout" "Deployment" (eq $svc.kind "rollout") }}
+    name: {{ $full }}-{{ $name }}
+  minReplicas: {{ $svc.autoscaling.min }}
+  maxReplicas: {{ $svc.autoscaling.max }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ $svc.autoscaling.cpu }} }
+  behavior:
+    scaleDown: { stabilizationWindowSeconds: 300 }
+{{- end }}
+{{- end }}

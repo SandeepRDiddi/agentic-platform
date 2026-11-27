@@ -1,0 +1,59 @@
+# Self-managed Kafka (KRaft) via Strimzi. On Azure you may instead point kafka.bootstrap at Event Hubs (Kafka API).
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: dual
+  namespace: kafka
+  labels: { strimzi.io/cluster: kafka }
+spec:
+  replicas: 3
+  roles: [controller, broker]
+  storage:
+    type: jbod
+    volumes: [{ id: 0, type: persistent-claim, size: 100Gi, deleteClaim: false }]
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: kafka
+  namespace: kafka
+  annotations: { strimzi.io/node-pools: enabled, strimzi.io/kraft: enabled }
+spec:
+  kafka:
+    version: 3.8.0
+    listeners:
+      - { name: plain, port: 9092, type: internal, tls: false, authentication: { type: scram-sha-512 } }
+      - { name: tls, port: 9093, type: internal, tls: true }
+    config:
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      default.replication.factor: 3
+      min.insync.replicas: 2
+  entityOperator: { topicOperator: {}, userOperator: {} }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata: { name: agent.tasks, namespace: kafka, labels: { strimzi.io/cluster: kafka } }
+spec: { partitions: 12, replicas: 3, config: { retention.ms: "604800000", min.insync.replicas: "2" } }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata: { name: agent.results, namespace: kafka, labels: { strimzi.io/cluster: kafka } }
+spec: { partitions: 12, replicas: 3, config: { retention.ms: "259200000" } }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata: { name: agent.tasks.dlq, namespace: kafka, labels: { strimzi.io/cluster: kafka } }
+spec: { partitions: 3, replicas: 3, config: { retention.ms: "2592000000" } }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata: { name: agentic, namespace: kafka, labels: { strimzi.io/cluster: kafka } }
+spec:
+  authentication: { type: scram-sha-512 }
+  authorization:
+    type: simple
+    acls:
+      - { resource: { type: topic, name: agent., patternType: prefix }, operations: [Read, Write, Describe, Create] }
+      - { resource: { type: group, name: agentic-, patternType: prefix }, operations: [Read, Describe] }

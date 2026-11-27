@@ -1,0 +1,15 @@
+{{- $full := include "agentic.fullname" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $full }}-config
+  labels: {{- include "agentic.labels" . | nindent 4 }}
+data:
+  GATEWAY_URL: "http://{{ $full }}-gateway:{{ .Values.services.gateway.port | int }}"
+  ORCHESTRATOR_URL: "http://{{ $full }}-orchestrator:{{ .Values.services.orchestrator.port | int }}"
+  MCP_URL: "http://{{ $full }}-tools:{{ .Values.services.tools.port | int }}/mcp"
+  INTERNAL_API_URL: "http://{{ $full }}-internal-api:{{ index .Values.services "internal-api" "port" | int }}"
+  KAFKA_BOOTSTRAP: {{ .Values.kafka.bootstrap | quote }}
+  {{- range $k, $v := .Values.config }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
